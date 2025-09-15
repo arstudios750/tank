@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>3D Tank Battle</title>
+<title>Realistic 3D Tank Game</title>
 <style>
-  body { margin:0; overflow:hidden; background:#222; }
+  body { margin:0; overflow:hidden; }
   #healthBar { position:absolute; top:10px; left:10px; width:200px; height:20px; background:red; }
   #healthFill { width:100%; height:100%; background:lime; }
 </style>
@@ -12,86 +12,94 @@
 <body>
 <div id="healthBar"><div id="healthFill"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/controls/OrbitControls.js"></script>
+
 <script>
-// --- Scene ---
-const scene = new THREE.Scene();
+let scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
 
-// --- Camera ---
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 500);
-camera.position.set(0, 60, 60);
-camera.lookAt(0, 0, 0);
+let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.position.set(0,50,50);
+camera.lookAt(0,0,0);
 
-// --- Renderer ---
-const renderer = new THREE.WebGLRenderer({antialias:true});
+let renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// --- Lights ---
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(50, 100, 50);
-light.castShadow = true;
-scene.add(light);
+let controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enablePan=false;
+controls.maxPolarAngle=Math.PI/2;
+
+// Lights
+let dirLight = new THREE.DirectionalLight(0xffffff,1);
+dirLight.position.set(50,100,50);
+dirLight.castShadow=true;
+scene.add(dirLight);
 scene.add(new THREE.AmbientLight(0x404040));
 
-// --- Ground ---
-const groundMat = new THREE.MeshStandardMaterial({color:0x228B22});
-const groundGeo = new THREE.PlaneGeometry(100,100);
-const ground = new THREE.Mesh(groundGeo, groundMat);
+// Ground
+let groundMat = new THREE.MeshStandardMaterial({color:0x228B22});
+let groundGeo = new THREE.PlaneGeometry(100,100);
+let ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI/2;
-ground.receiveShadow = true;
+ground.receiveShadow=true;
 scene.add(ground);
 
-// --- Obstacles ---
-const obstacles = [];
+// Obstacles
+let obstacles = [];
 for(let i=0;i<10;i++){
-  const boxGeo = new THREE.BoxGeometry(5,5,5);
-  const boxMat = new THREE.MeshStandardMaterial({color:0x8B4513});
-  const box = new THREE.Mesh(boxGeo, boxMat);
+  let boxGeo = new THREE.BoxGeometry(5,5,5);
+  let boxMat = new THREE.MeshStandardMaterial({color:0x8B4513});
+  let box = new THREE.Mesh(boxGeo, boxMat);
   box.position.set(Math.random()*80-40,2.5,Math.random()*80-40);
-  box.castShadow = true;
+  box.castShadow=true;
   scene.add(box);
   obstacles.push(box);
 }
 
-// --- Player Tank ---
-const playerGeo = new THREE.BoxGeometry(3,2,4);
-const playerMat = new THREE.MeshStandardMaterial({color:0x00ff00});
-const playerTank = new THREE.Mesh(playerGeo, playerMat);
-playerTank.position.set(0,1,0);
-playerTank.castShadow = true;
-playerTank.health = 100;
-scene.add(playerTank);
+// GLTF loader
+let loader = new THREE.GLTFLoader();
 
-// --- Enemy Tanks ---
-const enemies = [];
-for(let i=0;i<5;i++){
-  const enemyGeo = new THREE.BoxGeometry(3,2,4);
-  const enemyMat = new THREE.MeshStandardMaterial({color:0xff0000});
-  const enemy = new THREE.Mesh(enemyGeo, enemyMat);
-  enemy.position.set(Math.random()*80-40,1,Math.random()*80-40);
-  enemy.castShadow = true;
-  enemy.health = 50;
-  scene.add(enemy);
-  enemies.push(enemy);
-}
+let playerTank;
+let enemyTanks = [];
 
-// --- Movement ---
+loader.load('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Tank/glTF/Tank.gltf', function(gltf){
+  playerTank = gltf.scene;
+  playerTank.scale.set(2,2,2);
+  playerTank.position.set(0,0,0);
+  scene.add(playerTank);
+  playerTank.health = 100;
+
+  // Spawn enemies
+  for(let i=0;i<3;i++){
+    let enemy = playerTank.clone();
+    enemy.position.set(Math.random()*50-25,0,Math.random()*50-25);
+    enemy.health = 50; // weaker than player
+    scene.add(enemy);
+    enemyTanks.push(enemy);
+  }
+
+  animate();
+});
+
+// Controls
 const keys = {};
 document.addEventListener('keydown', e=>keys[e.key.toLowerCase()]=true);
 document.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
 
+// Simple movement & collision
 function movePlayer(){
-  const speed = 0.5;
+  if(!playerTank) return;
+  let speed=0.2;
   if(keys['w']) playerTank.position.z -= speed;
   if(keys['s']) playerTank.position.z += speed;
   if(keys['a']) playerTank.position.x -= speed;
   if(keys['d']) playerTank.position.x += speed;
 
-  // Collision with obstacles
   obstacles.forEach(obs=>{
-    if(playerTank.position.distanceTo(obs.position)<4){
+    if(playerTank.position.distanceTo(obs.position)<3){
       if(keys['w']) playerTank.position.z += speed;
       if(keys['s']) playerTank.position.z -= speed;
       if(keys['a']) playerTank.position.x += speed;
@@ -100,37 +108,34 @@ function movePlayer(){
   });
 }
 
-// --- Enemy AI ---
+// Enemy AI
 function enemyAI(){
-  enemies.forEach(enemy=>{
+  if(!playerTank) return;
+  enemyTanks.forEach(enemy=>{
     if(enemy.health<=0) return;
-    const dir = new THREE.Vector3();
+    let dir = new THREE.Vector3();
     dir.subVectors(playerTank.position, enemy.position).normalize();
-    enemy.position.addScaledVector(dir,0.2);
+    enemy.position.addScaledVector(dir,0.1);
     obstacles.forEach(obs=>{
-      if(enemy.position.distanceTo(obs.position)<4){
-        enemy.position.addScaledVector(dir,-0.2);
+      if(enemy.position.distanceTo(obs.position)<3){
+        enemy.position.addScaledVector(dir,-0.1);
       }
     });
     if(enemy.position.distanceTo(playerTank.position)<5){
-      playerTank.health -= 0.1; // weaker attacks
+      playerTank.health -=0.05; // weak attacks
     }
   });
 }
 
-// --- Health Bar ---
+// Animate
 const healthFill = document.getElementById('healthFill');
-
-// --- Animation Loop ---
 function animate(){
   requestAnimationFrame(animate);
   movePlayer();
   enemyAI();
-  healthFill.style.width = ((playerTank.health||0)/100*100)+'%';
-  if(playerTank.health<0) healthFill.style.width = playerTank.health+'%';
+  if(playerTank) healthFill.style.width = ((playerTank.health||0)/100*100)+'%';
   renderer.render(scene,camera);
 }
-animate();
 </script>
 </body>
 </html>
