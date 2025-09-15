@@ -1,141 +1,241 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Realistic 3D Tank Game</title>
+<meta charset="utf-8" />
+<title>Three.js Tank Shooter — OBJ Tanks + Full Features</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  body { margin:0; overflow:hidden; }
-  #healthBar { position:absolute; top:10px; left:10px; width:200px; height:20px; background:red; }
-  #healthFill { width:100%; height:100%; background:lime; }
+html,body { margin:0; height:100%; overflow:hidden; font-family:Arial,sans-serif; background:#0b0c0d; color:#ddd }
+#overlay { position: absolute; top: 10px; left: 10px; z-index: 40; background: rgba(8,8,8,0.45); padding: 10px; border-radius:8px; backdrop-filter: blur(4px); }
+button { margin:4px; padding:8px 12px; border-radius:6px; border:1px solid #444; background:#111; color:#ddd; cursor:pointer; }
+button.active { border-color: #8fb; box-shadow: 0 0 8px rgba(100,255,180,0.08); }
+#status { margin-top:6px; font-size:13px; line-height:1.4 }
+#help { position: absolute; right: 10px; top: 10px; background: rgba(8,8,8,0.45); padding:10px; border-radius:8px; color:#eee; font-size:13px; z-index:40 }
+#canvas-container { width:100%; height:100% }
+#hud { position:absolute; bottom:10px; left:10px; z-index:40; background: rgba(8,8,8,0.35); padding:10px; border-radius:8px; font-size:14px; }
+.small { font-size:12px; color:#bbb }
 </style>
 </head>
 <body>
-<div id="healthBar"><div id="healthFill"></div></div>
-<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/controls/OrbitControls.js"></script>
+<div id="overlay">
+  <strong>Choose Tank</strong><br/>
+  <button id="btn-t34" class="active">T-34/85</button>
+  <button id="btn-su85">SU-85</button>
+  <div id="status">Health: <span id="health">100</span> | Enemies: <span id="enemyCount">0</span></div>
+  <div class="small">Graphics: OBJ Models | Turning: yaw inertia</div>
+</div>
+<div id="help">
+  Controls:<br/>
+  WASD - drive & strafe<br/>
+  Q/E - steer left/right<br/>
+  Mouse - aim turret<br/>
+  Left click or Space - fire<br/>
+  R - respawn
+</div>
+<div id="hud"></div>
+<div id="canvas-container"></div>
 
-<script>
-let scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.154.0/examples/jsm/controls/OrbitControls.js';
+import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.154.0/examples/jsm/loaders/OBJLoader.js';
 
-let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 500);
-camera.position.set(0,50,50);
-camera.lookAt(0,0,0);
+// ---------- Config ----------
+const PARTICLE_TEXTURE = 'sprites/spark1.png'; // local
+const TANK_MODELS = {
+  T34: 'models/T34.obj',
+  SU85: 'models/SU85.obj'
+};
 
-let renderer = new THREE.WebGLRenderer({antialias:true});
+// ---------- Scene ----------
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0b);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 4000);
+camera.position.set(0,10,-18);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
 
-let controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enablePan=false;
-controls.maxPolarAngle=Math.PI/2;
+// ---------- Lights ----------
+const hemi = new THREE.HemisphereLight(0xe8f3ff,0x222222,0.5); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff6e6,1.2);
+sun.position.set(80,160,-100);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-220; sun.shadow.camera.right=220; sun.shadow.camera.top=220; sun.shadow.camera.bottom=-220;
+sun.shadow.camera.near=20; sun.shadow.camera.far=600; sun.shadow.radius=8;
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0xbbd8ff,0.15); rim.position.set(-80,60,120); scene.add(rim);
 
-// Lights
-let dirLight = new THREE.DirectionalLight(0xffffff,1);
-dirLight.position.set(50,100,50);
-dirLight.castShadow=true;
-scene.add(dirLight);
-scene.add(new THREE.AmbientLight(0x404040));
+// ---------- Ground ----------
+const G_WIDTH=2000,G_DEPTH=2000,SEG_X=128,SEG_Z=128;
+const groundGeo=new THREE.PlaneGeometry(G_WIDTH,G_DEPTH,SEG_X,SEG_Z);
+const groundMat=new THREE.MeshStandardMaterial({color:0x42463a,roughness:0.95,metalness:0.02});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
 
-// Ground
-let groundMat = new THREE.MeshStandardMaterial({color:0x228B22});
-let groundGeo = new THREE.PlaneGeometry(100,100);
-let ground = new THREE.Mesh(groundGeo, groundMat);
-ground.rotation.x = -Math.PI/2;
-ground.receiveShadow=true;
-scene.add(ground);
+// simple noise for terrain
+const posAttr = groundGeo.attributes.position;
+for (let i=0;i<posAttr.count;i++){
+  const x=posAttr.getX(i),y=posAttr.getY(i);
+  const h=Math.sin(x*0.012)*3+Math.cos(y*0.015)*2+(Math.sin(x*0.05+y*0.02))*0.9+(Math.random()-0.5)*0.6;
+  posAttr.setZ(i,h);
+}
+posAttr.needsUpdate=true;
+ground.geometry.computeVertexNormals();
 
-// Obstacles
-let obstacles = [];
-for(let i=0;i<10;i++){
-  let boxGeo = new THREE.BoxGeometry(5,5,5);
-  let boxMat = new THREE.MeshStandardMaterial({color:0x8B4513});
-  let box = new THREE.Mesh(boxGeo, boxMat);
-  box.position.set(Math.random()*80-40,2.5,Math.random()*80-40);
-  box.castShadow=true;
-  scene.add(box);
-  obstacles.push(box);
+// ---------- Paths / obstacles ----------
+const path = new THREE.Mesh(new THREE.PlaneGeometry(600,80), new THREE.MeshStandardMaterial({color:0x2f2a22,roughness:0.98}));
+path.rotation.x=-Math.PI/2; path.position.set(0,0.05,0); path.receiveShadow=true; scene.add(path);
+
+// ---------- Ground sampling ----------
+function getGroundHeightFromGrid(x,z){
+  const u=(x+G_WIDTH/2)/G_WIDTH; const v=(z+G_DEPTH/2)/G_DEPTH;
+  const uc=Math.max(0,Math.min(1,u)), vc=Math.max(0,Math.min(1,v));
+  const fx=uc*SEG_X, fz=vc*SEG_Z;
+  const ix=Math.floor(fx), iz=Math.floor(fz);
+  const vertsPerRow=SEG_X+1;
+  const i00=iz*vertsPerRow+ix, i10=i00+1, i01=(iz+1)*vertsPerRow+ix, i11=i01+1;
+  const z00=posAttr.getZ(Math.max(0,Math.min(posAttr.count-1,i00)));
+  const z10=posAttr.getZ(Math.max(0,Math.min(posAttr.count-1,i10)));
+  const z01=posAttr.getZ(Math.max(0,Math.min(posAttr.count-1,i01)));
+  const z11=posAttr.getZ(Math.max(0,Math.min(posAttr.count-1,i11)));
+  const z0=z00*(1-(fx-ix))+z10*(fx-ix), z1=z01*(1-(fx-ix))+z11*(fx-ix);
+  return z0*(1-(fz-iz))+z1*(fz-iz);
 }
 
-// GLTF loader
-let loader = new THREE.GLTFLoader();
+function sampleGroundNormalFromGrid(x,z){
+  const dx=Math.max(G_WIDTH/SEG_X,1e-3), dz=Math.max(G_DEPTH/SEG_Z,1e-3);
+  const hL=getGroundHeightFromGrid(x-dx,z), hR=getGroundHeightFromGrid(x+dx,z);
+  const hD=getGroundHeightFromGrid(x,z-dz), hU=getGroundHeightFromGrid(x,z+dz);
+  const fx=(hR-hL)/(2*dx), fz=(hU-hD)/(2*dz);
+  const nx=-fx, ny=1, nz=-fz;
+  return new THREE.Vector3(nx,ny,nz).normalize();
+}
 
-let playerTank;
-let enemyTanks = [];
+function sampleGroundTilt(x,z){
+  const n=sampleGroundNormalFromGrid(x,z);
+  const fx=-n.x/n.y, fz=-n.z/n.y;
+  return { pitch:Math.atan(fz), roll:Math.atan(fx) };
+}
 
-loader.load('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Tank/glTF/Tank.gltf', function(gltf){
-  playerTank = gltf.scene;
-  playerTank.scale.set(2,2,2);
-  playerTank.position.set(0,0,0);
-  scene.add(playerTank);
-  playerTank.health = 100;
+// ---------- Tank class using OBJ ----------
+class Tank {
+  constructor(type='T34',isPlayer=false){
+    this.type=type; this.isPlayer=isPlayer; this.health=100;
+    this.group=new THREE.Group();
+    this.position=new THREE.Vector3();
+    this.radius=3.0;
+    this.yawVelocity=0; this.maxYawRate=0.02; this.yawAccel=0.0009; this.yawDamp=0.92;
+    this._verticalLerp=0.18; this._tiltLerp=0.12;
+    scene.add(this.group);
 
-  // Spawn enemies
-  for(let i=0;i<3;i++){
-    let enemy = playerTank.clone();
-    enemy.position.set(Math.random()*50-25,0,Math.random()*50-25);
-    enemy.health = 50; // weaker than player
-    scene.add(enemy);
-    enemyTanks.push(enemy);
+    this.turret=new THREE.Group(); this.group.add(this.turret);
+
+    this.reloadTime=0; this.barrel=null;
+
+    // load OBJ model
+    const loader=new OBJLoader();
+    loader.load(TANK_MODELS[type], obj=>{
+      obj.traverse(child=>{
+        if(child.isMesh){child.castShadow=true; child.receiveShadow=true; child.material.metalness=0.4; child.material.roughness=0.45;}
+      });
+      obj.scale.set(0.7,0.7,0.7);
+      this.group.add(obj);
+    });
   }
 
-  animate();
+  setPosition(x,z){ this.position.set(x,0,z); this.group.position.copy(this.position); }
+  setRotation(yaw){ this.group.rotation.y=yaw; }
+  alignToGround(){ 
+    const gx=this.position.x, gz=this.position.z;
+    const desiredY=getGroundHeightFromGrid(gx,gz)+1.2;
+    this.group.position.y=THREE.MathUtils.lerp(this.group.position.y,desiredY,this._verticalLerp);
+    const tilt=sampleGroundTilt(gx,gz);
+    this.group.rotation.x=THREE.MathUtils.lerp(this.group.rotation.x,tilt.pitch,this._tiltLerp);
+    this.group.rotation.z=THREE.MathUtils.lerp(this.group.rotation.z,-tilt.roll,this._tiltLerp);
+  }
+}
+
+// ---------- World ----------
+class World {
+  constructor(){
+    this.tanks=[]; this.projectiles=[]; this.obstacles=[]; this.player=null;
+    this.spawnEnemies(4); this.createObstacles(20);
+  }
+  addTank(t){ this.tanks.push(t); if(t.isPlayer)this.player=t; }
+  spawnPlayer(type='T34'){
+    if(this.player){ this.player.health=100; this.player.group.visible=true; this.player.setPosition(0,0); return; }
+    const t=new Tank(type,true); t.setPosition(0,0); this.addTank(t);
+  }
+  spawnEnemies(n=4){
+    for(let i=0;i<n;i++){
+      const type=(Math.random()>0.5)?'SU85':'T34';
+      const t=new Tank(type,false);
+      const x=(Math.random()-0.5)*300,z=(Math.random()-0.5)*300;
+      t.setPosition(x,z); this.addTank(t);
+    }
+    document.getElementById('enemyCount').innerText=this.tanks.filter(t=>!t.isPlayer && t.health>0).length;
+  }
+  createObstacles(count=20){
+    for(let i=0;i<count;i++){
+      const w=2+Math.random()*6,h=1+Math.random()*3,d=2+Math.random()*6;
+      const box=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:0x5a4b3e,roughness:0.9}));
+      box.position.set((Math.random()-0.5)*400,h/2,(Math.random()-0.5)*400);
+      box.castShadow=true; box.receiveShadow=true; scene.add(box);
+      this.obstacles.push({mesh:box,radius:Math.max(w,d)/1.2});
+    }
+  }
+  update(dt){
+    for(const t of this.tanks){ t.alignToGround(); }
+  }
+}
+
+// ---------- Input ----------
+const input={keys:{},fire:false};
+window.addEventListener('keydown',e=>{ input.keys[e.code]=true; });
+window.addEventListener('keyup',e=>{ input.keys[e.code]=false; input.fire=false; });
+
+// ---------- Camera ----------
+function updateCamera(dt){
+  if(!world.player) return;
+  const target=world.player.group;
+  const offset=new THREE.Vector3(0,6,-14).applyQuaternion(target.quaternion);
+  camera.position.lerp(world.player.position.clone().add(offset),0.12);
+  camera.lookAt(world.player.position.clone().add(new THREE.Vector3(0,2.2,0)));
+}
+
+// ---------- Init ----------
+const world=new World();
+let currentTankChoice='T34';
+world.spawnPlayer(currentTankChoice);
+
+const btnT34=document.getElementById('btn-t34');
+const btnSU85=document.getElementById('btn-su85');
+btnT34.onclick=()=>{ currentTankChoice='T34'; btnT34.classList.add('active'); btnSU85.classList.remove('active'); world.spawnPlayer(currentTankChoice); };
+btnSU85.onclick=()=>{ currentTankChoice='SU85'; btnSU85.classList.add('active'); btnT34.classList.remove('active'); world.spawnPlayer(currentTankChoice); };
+
+// ---------- Animate ----------
+let last=performance.now();
+function animate(now){
+  const dt=(now-last)*0.001; last=now;
+  world.update(dt); updateCamera(dt); renderer.render(scene,camera); requestAnimationFrame(animate);
+}
+animate(performance.now());
+
+// ---------- Handle resize ----------
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
 });
-
-// Controls
-const keys = {};
-document.addEventListener('keydown', e=>keys[e.key.toLowerCase()]=true);
-document.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
-
-// Simple movement & collision
-function movePlayer(){
-  if(!playerTank) return;
-  let speed=0.2;
-  if(keys['w']) playerTank.position.z -= speed;
-  if(keys['s']) playerTank.position.z += speed;
-  if(keys['a']) playerTank.position.x -= speed;
-  if(keys['d']) playerTank.position.x += speed;
-
-  obstacles.forEach(obs=>{
-    if(playerTank.position.distanceTo(obs.position)<3){
-      if(keys['w']) playerTank.position.z += speed;
-      if(keys['s']) playerTank.position.z -= speed;
-      if(keys['a']) playerTank.position.x += speed;
-      if(keys['d']) playerTank.position.x -= speed;
-    }
-  });
-}
-
-// Enemy AI
-function enemyAI(){
-  if(!playerTank) return;
-  enemyTanks.forEach(enemy=>{
-    if(enemy.health<=0) return;
-    let dir = new THREE.Vector3();
-    dir.subVectors(playerTank.position, enemy.position).normalize();
-    enemy.position.addScaledVector(dir,0.1);
-    obstacles.forEach(obs=>{
-      if(enemy.position.distanceTo(obs.position)<3){
-        enemy.position.addScaledVector(dir,-0.1);
-      }
-    });
-    if(enemy.position.distanceTo(playerTank.position)<5){
-      playerTank.health -=0.05; // weak attacks
-    }
-  });
-}
-
-// Animate
-const healthFill = document.getElementById('healthFill');
-function animate(){
-  requestAnimationFrame(animate);
-  movePlayer();
-  enemyAI();
-  if(playerTank) healthFill.style.width = ((playerTank.health||0)/100*100)+'%';
-  renderer.render(scene,camera);
-}
 </script>
 </body>
 </html>
