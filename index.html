@@ -2,19 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Tank Battle</title>
+<title>Tank Battle Arena</title>
 <style>
-  body {
-    margin: 0;
-    overflow: hidden;
-    background: #444;
-    font-family: sans-serif;
-    color: white;
-  }
-  canvas {
-    display: block;
-    background: #222;
-  }
+  body { margin:0; overflow:hidden; background:#222; color:white; font-family:sans-serif; }
+  canvas { display:block; background:#444; }
 </style>
 </head>
 <body>
@@ -25,16 +16,19 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
+// Tank class
 class Tank {
-  constructor(x, y, color, type) {
+  constructor(x, y, type, color) {
     this.x = x;
     this.y = y;
+    this.type = type;
+    this.color = color;
+    this.angle = 0;
+    this.speed = type === 'T34' ? 2 : 1.5;
     this.width = 40;
     this.height = 40;
-    this.angle = 0;
-    this.speed = 2;
-    this.color = color;
-    this.type = type; // 'T34' or 'SU85'
+    this.health = type === 'T34' ? 100 : 120;
+    this.maxHealth = this.health;
     this.bullets = [];
     this.fireCooldown = 0;
   }
@@ -42,10 +36,17 @@ class Tank {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
+    // Tank body
     ctx.fillStyle = this.color;
     ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
+    // Barrel
     ctx.fillStyle = 'black';
-    ctx.fillRect(0, -5, this.width/2, 10); // barrel
+    ctx.fillRect(0, -5, this.width/2, 10);
+    // Health bar
+    ctx.fillStyle = 'red';
+    ctx.fillRect(-this.width/2, -this.height/2-10, this.width, 5);
+    ctx.fillStyle = 'lime';
+    ctx.fillRect(-this.width/2, -this.height/2-10, this.width*(this.health/this.maxHealth), 5);
     ctx.restore();
   }
   move(dx, dy) {
@@ -57,61 +58,113 @@ class Tank {
   }
   fire() {
     if(this.fireCooldown <= 0){
-      const bullet = new Bullet(this.x + Math.cos(this.angle)*20, this.y + Math.sin(this.angle)*20, this.angle);
-      this.bullets.push(bullet);
-      this.fireCooldown = 20; // frames cooldown
+      const bulletSpeed = this.type === 'T34' ? 6 : 5;
+      const bulletDamage = this.type === 'T34' ? 20 : 30;
+      this.bullets.push(new Bullet(this.x + Math.cos(this.angle)*25, this.y + Math.sin(this.angle)*25, this.angle, bulletSpeed, bulletDamage, this));
+      this.fireCooldown = 25;
     }
   }
   updateBullets() {
-    this.bullets.forEach((b, i) => {
+    for(let i=this.bullets.length-1;i>=0;i--){
+      const b = this.bullets[i];
       b.update();
-      if(b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height){
+      if(b.x<0||b.x>canvas.width||b.y<0||b.y>canvas.height){
         this.bullets.splice(i,1);
+      } else {
+        // Check collision with tanks
+        for(let t of tanks){
+          if(t!==this && distance(b.x,b.y,t.x,t.y)<30){
+            t.health -= b.damage;
+            this.bullets.splice(i,1);
+            break;
+          }
+        }
       }
-    });
+    }
     if(this.fireCooldown>0) this.fireCooldown--;
   }
 }
 
+// Bullet class
 class Bullet {
-  constructor(x, y, angle){
+  constructor(x, y, angle, speed, damage, owner){
     this.x = x;
     this.y = y;
     this.angle = angle;
-    this.speed = 5;
-    this.radius = 5;
+    this.speed = speed;
+    this.damage = damage;
+    this.owner = owner;
   }
   update(){
-    this.x += Math.cos(this.angle) * this.speed;
-    this.y += Math.sin(this.angle) * this.speed;
+    this.x += Math.cos(this.angle)*this.speed;
+    this.y += Math.sin(this.angle)*this.speed;
     ctx.beginPath();
     ctx.fillStyle = 'yellow';
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+    ctx.arc(this.x, this.y, 5,0,Math.PI*2);
     ctx.fill();
   }
 }
 
+// Collectibles
+class PowerUp {
+  constructor(x,y,type){
+    this.x=x;
+    this.y=y;
+    this.type=type; // health, speed
+    this.size=20;
+  }
+  draw(){
+    ctx.fillStyle = this.type==='health'?'lime':'cyan';
+    ctx.beginPath();
+    ctx.arc(this.x,this.y,this.size/2,0,Math.PI*2);
+    ctx.fill();
+  }
+  checkPickup(tank){
+    if(distance(this.x,this.y,tank.x,tank.y)<30){
+      if(this.type==='health'){
+        tank.health=Math.min(tank.maxHealth,tank.health+30);
+      } else if(this.type==='speed'){
+        tank.speed+=1;
+        setTimeout(()=>tank.speed-=1,5000); // temporary speed boost
+      }
+      return true;
+    }
+    return false;
+  }
+}
+
+function distance(x1,y1,x2,y2){return Math.hypot(x2-x1,y2-y1);}
+
 // Player tank
-const player = new Tank(canvas.width/2, canvas.height/2, 'green', 'T34');
-const enemy = new Tank(200, 200, 'red', 'SU85');
+const player = new Tank(canvas.width/2, canvas.height/2, 'T34', 'green');
+
+// Enemy tanks
+const tanks = [player];
+for(let i=0;i<5;i++){
+  const type = Math.random()<0.5?'T34':'SU85';
+  tanks.push(new Tank(Math.random()*canvas.width, Math.random()*canvas.height,type,'red'));
+}
+
+// Power-ups
+const powerUps = [];
+function spawnPowerUp(){
+  const types=['health','speed'];
+  powerUps.push(new PowerUp(Math.random()*canvas.width, Math.random()*canvas.height, types[Math.floor(Math.random()*types.length)]));
+}
+setInterval(spawnPowerUp, 8000);
 
 // Controls
 const keys = {};
-window.addEventListener('keydown', e => keys[e.key] = true);
-window.addEventListener('keyup', e => keys[e.key] = false);
-
-// Mouse aim
-let mouseX = 0, mouseY = 0;
-canvas.addEventListener('mousemove', e => {
-  mouseX = e.clientX;
-  mouseY = e.clientY;
-});
-canvas.addEventListener('click', () => player.fire());
+window.addEventListener('keydown', e=>keys[e.key]=true);
+window.addEventListener('keyup', e=>keys[e.key]=false);
+let mouseX=0, mouseY=0;
+canvas.addEventListener('mousemove', e=>{mouseX=e.clientX; mouseY=e.clientY;});
+canvas.addEventListener('click', ()=>player.fire());
 
 // Game loop
-function gameLoop() {
+function gameLoop(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  
+
   // Player movement
   let dx=0, dy=0;
   if(keys['w']) dy=-1;
@@ -120,17 +173,39 @@ function gameLoop() {
   if(keys['d']) dx=1;
   player.move(dx, dy);
   player.rotateTo(mouseX, mouseY);
-  
-  // Enemy AI: rotate toward player and fire
-  enemy.rotateTo(player.x, player.y);
-  if(Math.random() < 0.02) enemy.fire();
-  
-  // Draw tanks
-  player.draw();
-  player.updateBullets();
-  enemy.draw();
-  enemy.updateBullets();
-  
+
+  // Enemy AI
+  for(let t of tanks){
+    if(t!==player){
+      t.rotateTo(player.x, player.y);
+      if(Math.random()<0.02) t.fire();
+      const dist = distance(t.x,t.y,player.x,player.y);
+      if(dist>100){
+        const angle = Math.atan2(player.y-t.y,player.x-t.x);
+        t.move(Math.cos(angle), Math.sin(angle));
+      }
+    }
+  }
+
+  // Draw power-ups
+  for(let i=powerUps.length-1;i>=0;i--){
+    powerUps[i].draw();
+    if(powerUps[i].checkPickup(player)){
+      powerUps.splice(i,1);
+    }
+  }
+
+  // Update and draw tanks
+  for(let i=tanks.length-1;i>=0;i--){
+    const t=tanks[i];
+    t.draw();
+    t.updateBullets();
+    if(t.health<=0 && t!==player){
+      // Respawn enemy
+      tanks[i] = new Tank(Math.random()*canvas.width, Math.random()*canvas.height, Math.random()<0.5?'T34':'SU85','red');
+    }
+  }
+
   requestAnimationFrame(gameLoop);
 }
 
