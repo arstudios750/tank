@@ -1,213 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Enhanced Tank Battle</title>
-  <style>
-    body { margin: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif; }
-    canvas { display: block; background: #444; }
-  </style>
+<meta charset="UTF-8">
+<title>3D Tank Battle</title>
+<style>body { margin: 0; overflow: hidden; }</style>
 </head>
 <body>
-<canvas id="gameCanvas"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/js/controls/OrbitControls.js"></script>
 <script>
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x555555);
 
-// Tank class
-class Tank {
-  constructor(x, y, type, color) {
-    this.x = x;
-    this.y = y;
-    this.type = type;
-    this.color = color;
-    this.angle = 0;
-    this.speed = type === 'T34' ? 2 : 1.5;
-    this.width = 40;
-    this.height = 40;
-    this.health = type === 'T34' ? 100 : 120;
-    this.maxHealth = this.health;
-    this.bullets = [];
-    this.fireCooldown = 0;
-  }
-  draw() {
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.angle);
-    ctx.fillStyle = this.color;
-    ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
-    ctx.fillStyle = 'black';
-    ctx.fillRect(0, -5, this.width / 2, 10);
-    ctx.fillStyle = 'red';
-    ctx.fillRect(-this.width / 2, -this.height / 2 - 10, this.width, 5);
-    ctx.fillStyle = 'lime';
-    ctx.fillRect(-this.width / 2, -this.height / 2 - 10, this.width * (this.health / this.maxHealth), 5);
-    ctx.restore();
-  }
-  move(dx, dy) {
-    this.x += dx * this.speed;
-    this.y += dy * this.speed;
-  }
-  rotateTo(x, y) {
-    this.angle = Math.atan2(y - this.y, x - this.x);
-  }
-  fire() {
-    if (this.fireCooldown <= 0) {
-      const bulletSpeed = this.type === 'T34' ? 6 : 5;
-      const bulletDamage = this.type === 'T34' ? 20 : 30;
-      this.bullets.push(new Bullet(this.x + Math.cos(this.angle) * 25, this.y + Math.sin(this.angle) * 25, this.angle, bulletSpeed, bulletDamage, this));
-      this.fireCooldown = 25;
-    }
-  }
-  updateBullets() {
-    for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const b = this.bullets[i];
-      b.update();
-      if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
-        this.bullets.splice(i, 1);
-      } else {
-        for (let t of tanks) {
-          if (t !== this && distance(b.x, b.y, t.x, t.y) < 30) {
-            t.health -= b.damage;
-            this.bullets.splice(i, 1);
-            break;
-          }
-        }
-      }
-    }
-    if (this.fireCooldown > 0) this.fireCooldown--;
-  }
-}
+let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0, 50, 50);
+camera.lookAt(0,0,0);
 
-// Bullet class
-class Bullet {
-  constructor(x, y, angle, speed, damage, owner) {
-    this.x = x;
-    this.y = y;
-    this.angle = angle;
-    this.speed = speed;
-    this.damage = damage;
-    this.owner = owner;
-  }
-  update() {
-    this.x += Math.cos(this.angle) * this.speed;
-    this.y += Math.sin(this.angle) * this.speed;
-    ctx.beginPath();
-    ctx.fillStyle = 'yellow';
-    ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
+let renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
 
-// Power-ups
-class PowerUp {
-  constructor(x, y, type) {
-    this.x = x;
-    this.y = y;
-    this.type = type;
-    this.size = 20;
-  }
-  draw() {
-    ctx.fillStyle = this.type === 'health' ? 'lime' : 'cyan';
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size / 2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  checkPickup(tank) {
-    if (distance(this.x, this.y, tank.x, tank.y) < 30) {
-      if (this.type === 'health') {
-        tank.health = Math.min(tank.maxHealth, tank.health + 30);
-      } else if (this.type === 'speed') {
-        tank.speed += 1;
-        setTimeout(() => tank.speed -= 1, 5000);
-      }
-      return true;
-    }
-    return false;
-  }
-}
+// Controls
+let controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enablePan = false;
+controls.maxPolarAngle = Math.PI/2;
 
-function distance(x1, y1, x2, y2) {
-  return Math.hypot(x2 - x1, y2 - y1);
+// Lighting
+let light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(50,50,50);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x404040));
+
+// Ground
+let groundGeo = new THREE.PlaneGeometry(100, 100);
+let groundMat = new THREE.MeshStandardMaterial({color: 0x228B22});
+let ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// Obstacles
+let obstacles = [];
+for(let i=0;i<10;i++){
+    let boxGeo = new THREE.BoxGeometry(5,5,5);
+    let boxMat = new THREE.MeshStandardMaterial({color:0x8B4513});
+    let box = new THREE.Mesh(boxGeo, boxMat);
+    box.position.set(Math.random()*80-40,2.5,Math.random()*80-40);
+    scene.add(box);
+    obstacles.push(box);
 }
 
 // Player tank
-const player = new Tank(canvas.width / 2, canvas.height / 2, 'T34', 'green');
+let playerGeo = new THREE.BoxGeometry(3,2,4);
+let playerMat = new THREE.MeshStandardMaterial({color:0x00ff00});
+let playerTank = new THREE.Mesh(playerGeo, playerMat);
+playerTank.position.y = 1;
+scene.add(playerTank);
 
 // Enemy tanks
-const tanks = [player];
-for (let i = 0; i < 5; i++) {
-  const type = Math.random() < 0.5 ? 'T34' : 'SU85';
-  tanks.push(new Tank(Math.random() * canvas.width, Math.random() * canvas.height, type, 'red'));
+let enemies = [];
+for(let i=0;i<5;i++){
+    let enemyGeo = new THREE.BoxGeometry(3,2,4);
+    let enemyMat = new THREE.MeshStandardMaterial({color:0xff0000});
+    let enemy = new THREE.Mesh(enemyGeo, enemyMat);
+    enemy.position.set(Math.random()*80-40,1,Math.random()*80-40);
+    enemy.health = 50; // weaker than player
+    scene.add(enemy);
+    enemies.push(enemy);
 }
 
-// Power-ups
-const powerUps = [];
-function spawnPowerUp() {
-  const types = ['health', 'speed'];
-  powerUps.push(new PowerUp(Math.random() * canvas.width, Math.random() * canvas.height, types[Math.floor(Math.random() * types.length)]));
-}
-setInterval(spawnPowerUp, 8000);
+// Basic movement
+let keys = {};
+document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-// Controls
-const keys = {};
-window.addEventListener('keydown', e => keys[e.key] = true);
-window.addEventListener('keyup', e => keys[e.key] = false);
-let mouseX = 0, mouseY = 0;
-canvas.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-canvas.addEventListener('click', () => player.fire());
+function movePlayer(){
+    let speed = 0.5;
+    if(keys['w']) playerTank.position.z -= speed;
+    if(keys['s']) playerTank.position.z += speed;
+    if(keys['a']) playerTank.position.x -= speed;
+    if(keys['d']) playerTank.position.x += speed;
 
-// Game loop
-function gameLoop() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Player movement
-  let dx = 0, dy = 0;
-  if (keys['w']) dy = -1;
-  if (keys['s']) dy = 1;
-  if (keys['a']) dx = -1;
-  if (keys['d']) dx = 1;
-  player.move(dx, dy);
-  player.rotateTo(mouseX, mouseY);
-
-  // Enemy AI
-  for (let t of tanks) {
-    if (t !== player) {
-      t.rotateTo(player.x, player.y);
-      if (Math.random() < 0.02) t.fire();
-      const dist = distance(t.x, t.y, player.x, player.y);
-      if (dist > 100) {
-        const angle = Math.atan2(player.y - t.y, player.x - t.x);
-        t.move(Math.cos(angle), Math.sin(angle));
-      }
-    }
-  }
-
-  // Draw power-ups
-  for (let i = powerUps.length - 1; i >= 0; i--) {
-    powerUps[i].draw();
-    if (powerUps[i].checkPickup(player)) {
-      powerUps.splice(i, 1);
-    }
-  }
-
-  // Update and draw tanks
-  for (let i = tanks.length - 1; i >= 0; i--) {
-    const t = tanks[i];
-    t.draw();
-    t.updateBullets();
-    if (t.health <= 0 && t !== player) {
-      tanks[i] = new Tank(Math.random() * canvas.width, Math.random() * canvas.height, Math.random() < 0.5 ? 'T34' : 'SU85', 'red');
-    }
-  }
-
-  requestAnimationFrame(gameLoop);
+    // simple obstacle collision
+    obstacles.forEach(obs=>{
+        if(playerTank.position.distanceTo(obs.position)<4){
+            // simple pushback
+            if(keys['w']) playerTank.position.z += speed;
+            if(keys['s']) playerTank.position.z -= speed;
+            if(keys['a']) playerTank.position.x += speed;
+            if(keys['d']) playerTank.position.x -= speed;
+        }
+    });
 }
 
-gameLoop();
+// Enemy AI
+function enemyAI(){
+    enemies.forEach(enemy=>{
+        if(enemy.health<=0) return; // dead, keep on map but visually down
+        let dir = new THREE.Vector3();
+        dir.subVectors(playerTank.position, enemy.position).normalize();
+        enemy.position.addScaledVector(dir, 0.2); // move slowly
+        // collision with obstacles
+        obstacles.forEach(obs=>{
+            if(enemy.position.distanceTo(obs.position)<4){
+                enemy.position.addScaledVector(dir,-0.2);
+            }
+        });
+        // collision with player
+        if(enemy.position.distanceTo(playerTank.position)<5){
+            playerTank.health = (playerTank.health||100)-0.2; // slowly drain health
+        }
+    });
+}
+
+// Health bar
+let healthBar = document.createElement('div');
+healthBar.style.position='absolute';
+healthBar.style.top='10px';
+healthBar.style.left='10px';
+healthBar.style.width='200px';
+healthBar.style.height='20px';
+healthBar.style.background='red';
+document.body.appendChild(healthBar);
+let healthFill = document.createElement('div');
+healthFill.style.width='100%';
+healthFill.style.height='100%';
+healthFill.style.background='lime';
+healthBar.appendChild(healthFill);
+
+// Animate
+function animate(){
+    requestAnimationFrame(animate);
+    movePlayer();
+    enemyAI();
+    // update health bar
+    healthFill.style.width = ((playerTank.health||100)/100*100)+'%';
+    // make health go negative visually if dead
+    if((playerTank.health||0)<0) healthFill.style.width = (playerTank.health||0)+'%';
+
+    renderer.render(scene, camera);
+}
+animate();
 </script>
 </body>
 </html>
